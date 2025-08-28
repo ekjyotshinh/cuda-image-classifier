@@ -1,12 +1,11 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-#include <wb.h>
 
 #define MASK_WIDTH 5
 #define MASK_RADIUS MASK_WIDTH / 2
 #define TILE_WIDTH 16
 #define SHARED_MEMORY_WIDTH (TILE_WIDTH + MASK_WIDTH - 1)
-#define CLAMP(x) (min(max((x), 0.0), 1.0))
+#define CLAMP(x) (fmin(fmax((x), 0.0f), 1.0f))
 
 __global__ void convolution(float *inputImage, const float *__restrict__ convolutionMask, float *outputImage,
                             int numChannels, int imageWidth, int imageHeight)
