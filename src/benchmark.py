@@ -33,19 +33,19 @@ def run(n_warm=10, n_iters=50, batch_sizes=(16, 32, 64, 128), resolutions=(32, 6
 
             # correctness check
             if y_baseline.shape != y_custom.shape:
-                match = False
+                correctness_msg = "❌ Shape mismatch"
                 max_diff = None
-                shape_mismatch = True
-            else:
-                match = torch.allclose(y_baseline, y_custom, rtol=1e-3, atol=1e-5)
+            elif torch.allclose(y_baseline, y_custom, rtol=1e-3, atol=1e-5):
+                correctness_msg = "✅ Correct"
                 max_diff = (y_baseline - y_custom).abs().max().item()
-                shape_mismatch = False
+            else:
+                max_diff = (y_baseline - y_custom).abs().max().item()
+                correctness_msg = f"❌ Max diff: {max_diff:.5f}"
 
             print(f"Batch {bs}, Res {H}x{H} -> "
                   f"Baseline: {base_t*1000:.2f} ms | "
                   f"Custom: {cust_t*1000:.2f} ms | "
-                  f"Δ={(base_t-cust_t)/base_t*100:.1f}% | "
-                  f"{'✅ Correct' if match else shape_mismatch and '❌ Shape mismatch' else f'❌ Max diff: {max_diff:.5f}'}")
+                  f"Δ={(base_t-cust_t)/base_t*100:.1f}% | {correctness_msg}")
 
 
 if __name__ == "__main__":
