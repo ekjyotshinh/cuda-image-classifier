@@ -14,8 +14,11 @@ def run(n_warm=10, n_iters=50, batch_sizes=(16, 32, 64, 128), resolutions=(32, 6
             # baseline output & warmup
             baseline_model = SimpleCNN().to(device).eval()
             for _ in range(n_warm): _ = baseline_model(x)
+            # Add synchronization for accurate timing on CUDA
+            if device == "cuda": torch.cuda.synchronize()
             t0 = time.time()
             for _ in range(n_iters): _ = baseline_model(x)
+            if device == "cuda": torch.cuda.synchronize()
             y_baseline = baseline_model(x)
             base_t = (time.time() - t0) / n_iters
 
@@ -26,8 +29,11 @@ def run(n_warm=10, n_iters=50, batch_sizes=(16, 32, 64, 128), resolutions=(32, 6
                 continue
 
             for _ in range(n_warm): _ = patched_model(x)
+            # Add synchronization for accurate timing on CUDA
+            if device == "cuda": torch.cuda.synchronize()
             t0 = time.time()
             for _ in range(n_iters): _ = patched_model(x)
+            if device == "cuda": torch.cuda.synchronize()
             y_custom = patched_model(x)
             cust_t = (time.time() - t0) / n_iters
 

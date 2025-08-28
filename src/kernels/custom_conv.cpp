@@ -6,11 +6,14 @@ void launch_convolution(const float *input, const float *mask, float *output,
 
 torch::Tensor custom_conv(torch::Tensor input, torch::Tensor mask)
 {
-    auto output = torch::zeros_like(input);
+    // The output shape should have the number of channels from the mask (weight)
+    auto out_channels = mask.size(0);
+    auto output = torch::zeros({input.size(0), out_channels, input.size(2), input.size(3)}, input.options());
+
     launch_convolution(input.data_ptr<float>(),
                        mask.data_ptr<float>(),
                        output.data_ptr<float>(),
-                       input.size(1), // channels
+                       input.size(1), // in_channels
                        input.size(2), // width
                        input.size(3)  // height
     );
