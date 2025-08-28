@@ -1,6 +1,7 @@
 import torch
 from torch.utils.cpp_extension import load
 import os
+from src.model import replace_with_custom
 
 def load_custom():
     this_dir = os.path.dirname(__file__)
@@ -13,9 +14,18 @@ def load_custom():
     return mod
 
 def try_patch_model_for_infer(model):
+    if not torch.cuda.is_available():
+        return model, None
+
     mod = load_custom()
-    # Patch model forward for demonstration (use a 5x5 mask)
-    mask = torch.ones(5,5, device="cuda")
-    original_forward = model.forward
-    model.forward = lambda x: mod.forward(x, mask)
+    if mod is None: 
+        return model, None
+
+    # This function will be used to replace the original conv2
+    def custom_fn(x, w, b):
+        return mod.forward(x, w, b)
+
+    model.eval()
+    # Use the provided replace_with_custom function to patch the model
+    model = replace_with_custom(model, custom_fn)
     return model, mod
