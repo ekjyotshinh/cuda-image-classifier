@@ -32,14 +32,21 @@ def run(n_warm=10, n_iters=50, batch_sizes=(16, 32, 64, 128), resolutions=(32, 6
             cust_t = (time.time() - t0) / n_iters
 
             # correctness check
-            match = torch.allclose(y_baseline, y_custom, rtol=1e-3, atol=1e-5)
-            max_diff = (y_baseline - y_custom).abs().max().item()
+            if y_baseline.shape != y_custom.shape:
+                match = False
+                max_diff = None
+                shape_mismatch = True
+            else:
+                match = torch.allclose(y_baseline, y_custom, rtol=1e-3, atol=1e-5)
+                max_diff = (y_baseline - y_custom).abs().max().item()
+                shape_mismatch = False
 
             print(f"Batch {bs}, Res {H}x{H} -> "
                   f"Baseline: {base_t*1000:.2f} ms | "
                   f"Custom: {cust_t*1000:.2f} ms | "
                   f"Δ={(base_t-cust_t)/base_t*100:.1f}% | "
-                  f"{'✅ Correct' if match else f'❌ Max diff: {max_diff:.5f}'}")
+                  f"{'✅ Correct' if match else shape_mismatch and '❌ Shape mismatch' else f'❌ Max diff: {max_diff:.5f}'}")
+
 
 if __name__ == "__main__":
     run()
