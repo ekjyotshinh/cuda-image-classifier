@@ -1,69 +1,77 @@
 #include <cuda_runtime.h>
-#include <torch/extension.h>
+#include <device_launch_parameters.h>
+#include <wb.h>
 
-__global__ void conv3x3_pad1_kernel(
-    const float *__restrict__ input,
-    const float *__restrict__ weight,
-    const float *__restrict__ bias,
-    float *__restrict__ output,
-    int N, int C, int H, int W, int O)
+#define MASK_WIDTH 5
+#define MASK_RADIUS MASK_WIDTH / 2
+#define TILE_WIDTH 16
+#define SHARED_MEMORY_WIDTH (TILE_WIDTH + MASK_WIDTH - 1)
+#define CLAMP(x) (min(max((x), 0.0), 1.0))
+
+__global__ void convolution(float *inputImage, const float *__restrict__ convolutionMask, float *outputImage,
+                            int numChannels, int imageWidth, int imageHeight)
 {
-    int n = blockIdx.z;
-    int o = blockIdx.y;
-    int hw = blockIdx.x * blockDim.x + threadIdx.x;
-    if (hw >= H * W)
-        return;
+    __shared__ float sharedMemory[SHARED_MEMORY_WIDTH][SHARED_MEMORY_WIDTH];
+    int channel;
 
-    int h = hw / W;
-    int w = hw % W;
-
-    float acc = bias ? bias[o] : 0.f;
-
-    for (int c = 0; c < C; ++c)
+    for (channel = 0; channel < numChannels; channel++)
     {
-        for (int kh = 0; kh < 3; ++kh)
+        // First batch loading
+        int destIndex = threadIdx.y * TILE_WIDTH + threadIdx.x;
+        int destY = destIndex / SHARED_MEMORY_WIDTH, destX = destIndex % SHARED_MEMORY_WIDTH;
+        int srcY = blockIdx.y * TILE_WIDTH + destY - MASK_RADIUS;
+        int srcX = blockIdx.x * TILE_WIDTH + destX - MASK_RADIUS;
+        int srcIndex = (srcY * imageWidth + srcX) * numChannels + channel;
+
+        if (srcY >= 0 && srcY < imageHeight && srcX >= 0 && srcX < imageWidth)
         {
-            int ih = h + kh - 1;
-            if (ih < 0 || ih >= H)
-                continue;
-            for (int kw = 0; kw < 3; ++kw)
+            sharedMemory[destY][destX] = inputImage[srcIndex];
+        }
+        else
+        {
+            sharedMemory[destY][destX] = 0;
+        }
+
+        // Second batch loading
+        destIndex = threadIdx.y * TILE_WIDTH + threadIdx.x + TILE_WIDTH * TILE_WIDTH;
+        destY = destIndex / SHARED_MEMORY_WIDTH;
+        destX = destIndex % SHARED_MEMORY_WIDTH;
+        srcY = blockIdx.y * TILE_WIDTH + destY - MASK_RADIUS;
+        srcX = blockIdx.x * TILE_WIDTH + destX - MASK_RADIUS;
+        srcIndex = (srcY * imageWidth + srcX) * numChannels + channel;
+
+        if (destY < SHARED_MEMORY_WIDTH)
+        {
+            if (srcY >= 0 && srcY < imageHeight && srcX >= 0 && srcX < imageWidth)
             {
-                int iw = w + kw - 1;
-                if (iw < 0 || iw >= W)
-                    continue;
-                float inp_val = input[((n * C + c) * H + ih) * W + iw];
-                float w_val = weight[(((o * C + c) * 3 + kh) * 3 + kw)];
-                acc += inp_val * w_val;
+                sharedMemory[destY][destX] = inputImage[srcIndex];
+            }
+            else
+            {
+                sharedMemory[destY][destX] = 0;
             }
         }
+        __syncthreads(); // Wait for all threads to finish loading
+
+        float accumulatedValue = 0;
+        int y, x;
+        // Perform convolution
+        for (y = 0; y < MASK_WIDTH; y++)
+        {
+            for (x = 0; x < MASK_WIDTH; x++)
+            {
+                accumulatedValue += sharedMemory[threadIdx.y + y][threadIdx.x + x] * convolutionMask[y * MASK_WIDTH + x];
+            }
+        }
+
+        // Compute output pixel location
+        int outputY = blockIdx.y * TILE_WIDTH + threadIdx.y;
+        int outputX = blockIdx.x * TILE_WIDTH + threadIdx.x;
+
+        if (outputY < imageHeight && outputX < imageWidth)
+        {
+            outputImage[(outputY * imageWidth + outputX) * numChannels + channel] = CLAMP(accumulatedValue);
+        }
+        __syncthreads(); // Synchronize threads
     }
-
-    output[((n * O + o) * H + h) * W + w] = acc;
-}
-
-torch::Tensor conv3x3_pad1_forward(
-    torch::Tensor input, torch::Tensor weight, c10::optional<torch::Tensor> bias)
-{
-    TORCH_CHECK(input.is_cuda() && weight.is_cuda(), "Tensors must be CUDA");
-
-    int N = input.size(0);
-    int C = input.size(1);
-    int H = input.size(2);
-    int W = input.size(3);
-    int O = weight.size(0);
-
-    auto output = torch::empty({N, O, H, W}, input.options());
-
-    int threads = 256;
-    int blocks = (H * W + threads - 1) / threads;
-    dim3 grid(blocks, O, N);
-
-    conv3x3_pad1_kernel<<<grid, threads>>>(
-        input.data_ptr<float>(),
-        weight.data_ptr<float>(),
-        bias.has_value() ? bias.value().data_ptr<float>() : nullptr,
-        output.data_ptr<float>(),
-        N, C, H, W, O);
-
-    return output;
 }
