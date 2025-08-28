@@ -6,18 +6,26 @@ import torch.nn.functional as F
 class SimpleCNN(nn.Module):
     def __init__(self, num_classes=10):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 32, 3, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, 3, padding=1)
-        self.pool  = nn.MaxPool2d(2,2)
-        self.fc    = nn.Linear(64*8*8, num_classes)
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.num_classes = num_classes
+
+        # Placeholder for fc; will initialize dynamically
+        self.fc = None
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
-        x = self.pool(x)
-        x = F.relu(self.conv2(x))  # custom kernel will replace this at inference
-        x = self.pool(x)
+        x = self.pool(F.relu(self.conv2(x)))
+
+        # Dynamically compute flattened size
+        if self.fc is None:
+            n_features = x.numel() // x.shape[0]  # total features per sample
+            self.fc = nn.Linear(n_features, self.num_classes).to(x.device)
+
         x = x.view(x.size(0), -1)
-        return self.fc(x)
+        x = self.fc(x)
+        return x
 
 def replace_with_custom(model, custom_fn):
     # a new forward function
