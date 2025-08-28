@@ -1,76 +1,55 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#include <cmath> // for std::min / std::max
 
 #define MASK_WIDTH 5
-#define MASK_RADIUS MASK_WIDTH / 2
+#define MASK_RADIUS (MASK_WIDTH / 2)
 #define TILE_WIDTH 16
 #define SHARED_MEMORY_WIDTH (TILE_WIDTH + MASK_WIDTH - 1)
-#define CLAMP(x) (fmin(fmax((x), 0.0f), 1.0f))
+#define CLAMP(x) (fminf(fmaxf((x), 0.0f), 1.0f))
 
-__global__ void convolution(float *inputImage, const float *__restrict__ convolutionMask, float *outputImage,
-                            int numChannels, int imageWidth, int imageHeight)
+__global__ void convolution_kernel(
+    const float *input, const float *mask, float *output,
+    int channels, int width, int height)
 {
-    __shared__ float sharedMemory[SHARED_MEMORY_WIDTH][SHARED_MEMORY_WIDTH];
-    int channel;
+    __shared__ float smem[SHARED_MEMORY_WIDTH][SHARED_MEMORY_WIDTH];
 
-    for (channel = 0; channel < numChannels; channel++)
-    {
-        // First batch loading
-        int destIndex = threadIdx.y * TILE_WIDTH + threadIdx.x;
-        int destY = destIndex / SHARED_MEMORY_WIDTH, destX = destIndex % SHARED_MEMORY_WIDTH;
-        int srcY = blockIdx.y * TILE_WIDTH + destY - MASK_RADIUS;
-        int srcX = blockIdx.x * TILE_WIDTH + destX - MASK_RADIUS;
-        int srcIndex = (srcY * imageWidth + srcX) * numChannels + channel;
+    int c = blockIdx.z; // channel
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int bx = blockIdx.x * TILE_WIDTH;
+    int by = blockIdx.y * TILE_WIDTH;
 
-        if (srcY >= 0 && srcY < imageHeight && srcX >= 0 && srcX < imageWidth)
-        {
-            sharedMemory[destY][destX] = inputImage[srcIndex];
-        }
-        else
-        {
-            sharedMemory[destY][destX] = 0;
-        }
+    int x = bx + tx;
+    int y = by + ty;
 
-        // Second batch loading
-        destIndex = threadIdx.y * TILE_WIDTH + threadIdx.x + TILE_WIDTH * TILE_WIDTH;
-        destY = destIndex / SHARED_MEMORY_WIDTH;
-        destX = destIndex % SHARED_MEMORY_WIDTH;
-        srcY = blockIdx.y * TILE_WIDTH + destY - MASK_RADIUS;
-        srcX = blockIdx.x * TILE_WIDTH + destX - MASK_RADIUS;
-        srcIndex = (srcY * imageWidth + srcX) * numChannels + channel;
+    // load into shared memory
+    int smem_x = tx;
+    int smem_y = ty;
+    int ix = x - MASK_RADIUS;
+    int iy = y - MASK_RADIUS;
 
-        if (destY < SHARED_MEMORY_WIDTH)
-        {
-            if (srcY >= 0 && srcY < imageHeight && srcX >= 0 && srcX < imageWidth)
-            {
-                sharedMemory[destY][destX] = inputImage[srcIndex];
-            }
-            else
-            {
-                sharedMemory[destY][destX] = 0;
-            }
-        }
-        __syncthreads(); // Wait for all threads to finish loading
+    if (ix >= 0 && ix < width && iy >= 0 && iy < height)
+        smem[smem_y][smem_x] = input[(iy * width + ix) * channels + c];
+    else
+        smem[smem_y][smem_x] = 0.0f;
 
-        float accumulatedValue = 0;
-        int y, x;
-        // Perform convolution
-        for (y = 0; y < MASK_WIDTH; y++)
-        {
-            for (x = 0; x < MASK_WIDTH; x++)
-            {
-                accumulatedValue += sharedMemory[threadIdx.y + y][threadIdx.x + x] * convolutionMask[y * MASK_WIDTH + x];
-            }
-        }
+    __syncthreads();
 
-        // Compute output pixel location
-        int outputY = blockIdx.y * TILE_WIDTH + threadIdx.y;
-        int outputX = blockIdx.x * TILE_WIDTH + threadIdx.x;
+    float acc = 0.0f;
+    for (int i = 0; i < MASK_WIDTH; i++)
+        for (int j = 0; j < MASK_WIDTH; j++)
+            acc += smem[ty + i][tx + j] * mask[i * MASK_WIDTH + j];
 
-        if (outputY < imageHeight && outputX < imageWidth)
-        {
-            outputImage[(outputY * imageWidth + outputX) * numChannels + channel] = CLAMP(accumulatedValue);
-        }
-        __syncthreads(); // Synchronize threads
-    }
+    if (x < width && y < height)
+        output[(y * width + x) * channels + c] = CLAMP(acc);
+}
+
+void launch_convolution(const float *input, const float *mask, float *output,
+                        int channels, int width, int height)
+{
+    dim3 block(TILE_WIDTH, TILE_WIDTH);
+    dim3 grid((width + TILE_WIDTH - 1) / TILE_WIDTH, (height + TILE_WIDTH - 1) / TILE_WIDTH, channels);
+
+    convolution_kernel<<<grid, block>>>(input, mask, output, channels, width, height);
 }
