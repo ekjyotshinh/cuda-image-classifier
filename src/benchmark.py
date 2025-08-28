@@ -4,7 +4,7 @@ from src.model import SimpleCNN
 from src.utils import try_patch_model_for_infer
 
 @torch.inference_mode()
-def benchmark(batch_sizes=[32, 128, 512, 1024], image_sizes=[32, 64, 128], n_warm=10, n_iters=50):
+def benchmark(batch_sizes=[32, 128, 512, 1024], image_sizes=[32], n_warm=10, n_iters=50):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}\n")
     
