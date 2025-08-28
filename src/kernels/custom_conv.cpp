@@ -19,5 +19,5 @@ torch::Tensor custom_conv(torch::Tensor input, torch::Tensor mask)
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
-    m.def("custom_conv", &custom_conv, "Custom CUDA convolution");
+    m.def("forward", &custom_conv, "Custom convolution forward");
 }
