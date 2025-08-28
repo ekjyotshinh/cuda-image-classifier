@@ -2,8 +2,9 @@
 
 #define TILE_WIDTH 16
 #define KERNEL_WIDTH 3
+#define BLOCK_WIDTH (TILE_WIDTH + KERNEL_WIDTH - 1)
 
-// Final, optimized tiled 3x3 convolution kernel
+// The tiled convolution kernel
 __global__ void conv3x3_tiled_kernel(
     const float *__restrict__ input,
     const float *__restrict__ weight,
@@ -11,29 +12,25 @@ __global__ void conv3x3_tiled_kernel(
     float *__restrict__ output,
     int N, int C, int H, int W, int O)
 {
-    // Shared memory for a tile of the input data
-    __shared__ float s_data[TILE_WIDTH][TILE_WIDTH + KERNEL_WIDTH - 1];
+    __shared__ float s_data[BLOCK_WIDTH][BLOCK_WIDTH];
 
-    // Identify the specific output pixel this thread will compute
-    int n = blockIdx.z / O;
-    int o = blockIdx.z % O;
-    int out_tile_x = blockIdx.x * TILE_WIDTH;
-    int out_tile_y = blockIdx.y * TILE_WIDTH;
     int tx = threadIdx.x;
     int ty = threadIdx.y;
 
-    // This thread's output pixel coordinates
-    int out_x = out_tile_x + tx;
-    int out_y = out_tile_y + ty;
+    int n = blockIdx.z / O;
+    int o = blockIdx.z % O;
 
-    // Accumulator for the output pixel
+    int out_tile_x_start = blockIdx.x * TILE_WIDTH;
+    int out_tile_y_start = blockIdx.y * TILE_WIDTH;
+
+    int in_tile_x_start = out_tile_x_start - KERNEL_WIDTH / 2;
+    int in_tile_y_start = out_tile_y_start - KERNEL_WIDTH / 2;
+
     float acc = bias ? bias[o] : 0.0f;
 
-    // Loop over all input channels
-    for (int c = 0; c < C; c++) {
-        // Load a tile of the input data into shared memory
-        int in_x = out_tile_x + tx - KERNEL_WIDTH / 2;
-        int in_y = out_tile_y + ty - KERNEL_WIDTH / 2;
+    for (int c = 0; c < C; ++c) {
+        int in_x = in_tile_x_start + tx;
+        int in_y = in_tile_y_start + ty;
 
         if (in_x >= 0 && in_x < W && in_y >= 0 && in_y < H) {
             s_data[ty][tx] = input[((n * C + c) * H + in_y) * W + in_x];
@@ -42,11 +39,10 @@ __global__ void conv3x3_tiled_kernel(
         }
         __syncthreads();
 
-        // Perform the convolution using the data in shared memory
-        if (out_x < W && out_y < H) {
+        if (ty < TILE_WIDTH && tx < TILE_WIDTH) {
             for (int kh = 0; kh < KERNEL_WIDTH; kh++) {
                 for (int kw = 0; kw < KERNEL_WIDTH; kw++) {
-                    acc += s_data[ty][tx - KERNEL_WIDTH / 2 + kw] * 
+                    acc += s_data[ty + kh][tx + kw] * 
                            weight[(((o * C + c) * KERNEL_WIDTH + kh) * KERNEL_WIDTH + kw)];
                 }
             }
@@ -54,9 +50,12 @@ __global__ void conv3x3_tiled_kernel(
         __syncthreads();
     }
 
-    // Write the final result to global memory
-    if (out_x < W && out_y < H) {
-        output[((n * O + o) * H + out_y) * W + out_x] = acc;
+    if (ty < TILE_WIDTH && tx < TILE_WIDTH) {
+        int out_x = out_tile_x_start + tx;
+        int out_y = out_tile_y_start + ty;
+        if (out_x < W && out_y < H) {
+            output[((n * O + o) * H + out_y) * W + out_x] = acc;
+        }
     }
 }
 
@@ -68,7 +67,7 @@ extern "C" void launch_conv3x3_tiled_kernel(
     float *output,
     int N, int C, int H, int W, int O)
 {
-    dim3 block(TILE_WIDTH, TILE_WIDTH);
+    dim3 block(BLOCK_WIDTH, BLOCK_WIDTH);
     dim3 grid((W + TILE_WIDTH - 1) / TILE_WIDTH, (H + TILE_WIDTH - 1) / TILE_WIDTH, N * O);
 
     conv3x3_tiled_kernel<<<grid, block>>>(

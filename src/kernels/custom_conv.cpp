@@ -10,8 +10,8 @@ extern "C" void launch_conv3x3_tiled_kernel(
 
 // C++ wrapper function that will be called from Python
 torch::Tensor custom_conv_forward(
-    torch::Tensor input, 
-    torch::Tensor weight, 
+    torch::Tensor input,
+    torch::Tensor weight,
     c10::optional<torch::Tensor> bias)
 {
     TORCH_CHECK(input.is_cuda() && weight.is_cuda(), "Tensors must be on CUDA");
