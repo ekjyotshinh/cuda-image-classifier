@@ -59,3 +59,18 @@ __global__ void conv3x3_tiled_kernel(
         output[((n * O + o) * H + out_y) * W + out_x] = acc;
     }
 }
+
+// Launcher function that will be called from the C++ file
+extern "C" void launch_conv3x3_tiled_kernel(
+    const float *input,
+    const float *weight,
+    const float *bias,
+    float *output,
+    int N, int C, int H, int W, int O)
+{
+    dim3 block(TILE_WIDTH, TILE_WIDTH);
+    dim3 grid((W + TILE_WIDTH - 1) / TILE_WIDTH, (H + TILE_WIDTH - 1) / TILE_WIDTH, N * O);
+
+    conv3x3_tiled_kernel<<<grid, block>>>(
+        input, weight, bias, output, N, C, H, W, O);
+}

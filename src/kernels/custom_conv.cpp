@@ -1,11 +1,11 @@
 #include <torch/extension.h>
 
-// Forward declaration of the CUDA kernel
-void conv3x3_tiled_kernel(
-    const float *__restrict__ input,
-    const float *__restrict__ weight,
-    const float *__restrict__ bias,
-    float *__restrict__ output,
+// Forward declaration of the launcher function from the .cu file
+extern "C" void launch_conv3x3_tiled_kernel(
+    const float *input,
+    const float *weight,
+    const float *bias,
+    float *output,
     int N, int C, int H, int W, int O);
 
 // C++ wrapper function that will be called from Python
@@ -24,12 +24,8 @@ torch::Tensor custom_conv_forward(
 
     auto output = torch::empty({N, O, H, W}, input.options());
 
-    // Set up grid and block dimensions for the tiled kernel
-    dim3 block(16, 16);
-    dim3 grid((W + 15) / 16, (H + 15) / 16, N * O);
-
-    // Launch the kernel
-    conv3x3_tiled_kernel<<<grid, block>>>(
+    // Call the launcher function from the .cu file
+    launch_conv3x3_tiled_kernel(
         input.data_ptr<float>(),
         weight.data_ptr<float>(),
         bias.has_value() ? bias.value().data_ptr<float>() : nullptr,
