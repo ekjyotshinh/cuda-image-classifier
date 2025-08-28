@@ -1,11 +1,11 @@
 #include <torch/extension.h>
 
-// Forward declaration of the CUDA kernel
-void conv3x3_pad1_kernel(
-    const float *__restrict__ input,
-    const float *__restrict__ weight,
-    const float *__restrict__ bias,
-    float *__restrict__ output,
+// Forward declaration of the launcher function from the .cu file
+extern "C" void launch_conv3x3_pad1_kernel(
+    const float *input,
+    const float *weight,
+    const float *bias,
+    float *output,
     int N, int C, int H, int W, int O);
 
 // C++ wrapper function that will be called from Python
@@ -16,22 +16,16 @@ torch::Tensor custom_conv_forward(
 {
     TORCH_CHECK(input.is_cuda() && weight.is_cuda(), "Tensors must be on CUDA");
 
-    int N = input.size(0); // Batch size
-    int C = input.size(1); // Input channels
-    int H = input.size(2); // Height
-    int W = input.size(3); // Width
-    int O = weight.size(0); // Output channels
+    int N = input.size(0);
+    int C = input.size(1);
+    int H = input.size(2);
+    int W = input.size(3);
+    int O = weight.size(0);
 
-    // Create the output tensor with the correct shape
     auto output = torch::empty({N, O, H, W}, input.options());
 
-    // Set up grid and block dimensions for the CUDA kernel
-    int threads = 256;
-    int blocks = (H * W + threads - 1) / threads;
-    dim3 grid(blocks, O, N);
-
-    // Launch the kernel
-    conv3x3_pad1_kernel<<<grid, threads>>>(
+    // Call the launcher function from the .cu file
+    launch_conv3x3_pad1_kernel(
         input.data_ptr<float>(),
         weight.data_ptr<float>(),
         bias.has_value() ? bias.value().data_ptr<float>() : nullptr,
