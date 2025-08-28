@@ -1,17 +1,20 @@
-from src.model import SimpleCNN, replace_with_custom
+from torch.utils.cpp_extension import load
+import os
+
+def load_custom():
+    this_dir = os.path.dirname(__file__)
+    mod = load(
+        name="custom_conv",
+        sources=[os.path.join(this_dir, "kernels/custom_conv.cpp"),
+                 os.path.join(this_dir, "kernels/custom_conv_kernel.cu")],
+        verbose=True,
+    )
+    return mod
 
 def try_patch_model_for_infer(model):
-    import torch
-    if not torch.cuda.is_available():
-        return model, None
-    from src.kernels.build import load_custom
     mod = load_custom()
-    if mod is None: 
-        return model, None
-
-    def custom_fn(x, w, b):
-        return mod.conv3x3_pad1_forward(x, w, b if b is not None else None)
-
-    model.eval()
-    model = replace_with_custom(model, custom_fn)
+    # Patch model forward for demonstration (use a 5x5 mask)
+    mask = torch.ones(5,5, device="cuda")
+    original_forward = model.forward
+    model.forward = lambda x: mod.forward(x, mask)
     return model, mod
